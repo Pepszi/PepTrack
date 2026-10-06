@@ -27,6 +27,7 @@ struct ContentView: View {
             SubGroupListView(
                 client: selectedClient,
                 selectedTaskID: $selectedTaskID,
+                pinnedTaskID: taskIDPendingTitleFocus,
                 onTaskCreated: focusNewTask
             )
         }
@@ -53,8 +54,10 @@ struct ContentView: View {
             }
         }
         .onChange(of: selectedTaskID) { _, newID in
-            if newID != nil {
-                isInspectorPresented = true
+            guard let newID else { return }
+            isInspectorPresented = true
+            if newID != taskIDPendingTitleFocus {
+                taskIDPendingTitleFocus = nil
             }
         }
         .onAppear {
@@ -76,7 +79,8 @@ struct ContentView: View {
                 task: selectedTask,
                 titleFocusNonce: titleFocusNonce,
                 focusesTitle: taskIDPendingTitleFocus == selectedTask.persistentModelID,
-                onTitleFocusHandled: {
+                onTitleFocusHandled: { token in
+                    guard token == titleFocusNonce else { return }
                     taskIDPendingTitleFocus = nil
                 },
                 onDelete: {
@@ -100,11 +104,7 @@ struct ContentView: View {
 
     private var selectedTask: Task? {
         guard let selectedTaskID else { return nil }
-        let task: PepTrack.Task? = modelContext.registeredModel(for: selectedTaskID)
-        guard let task else {
-            return nil
-        }
-        guard !task.isDeleted else { return nil }
+        guard let task = task(for: selectedTaskID), !task.isDeleted else { return nil }
         if let selectedClientID,
            let ownerID = task.subGroup?.clientGroup?.persistentModelID,
            ownerID != selectedClientID {
@@ -113,11 +113,28 @@ struct ContentView: View {
         return task
     }
 
+    private func task(for id: PersistentIdentifier) -> PepTrack.Task? {
+        if let task: PepTrack.Task = modelContext.registeredModel(for: id) {
+            return task
+        }
+        for folder in selectedClient?.subGroups ?? [] {
+            if let task = folder.tasks.first(where: { $0.persistentModelID == id }) {
+                return task
+            }
+        }
+        return nil
+    }
+
     private func focusNewTask(_ id: PersistentIdentifier) {
-        selectedTaskID = id
-        isInspectorPresented = true
         taskIDPendingTitleFocus = id
         titleFocusNonce += 1
+        isInspectorPresented = true
+        selectedTaskID = id
+        let nonce = titleFocusNonce
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            guard titleFocusNonce == nonce else { return }
+            taskIDPendingTitleFocus = nil
+        }
     }
 }
 

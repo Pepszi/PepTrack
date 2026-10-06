@@ -4,6 +4,7 @@ import SwiftUI
 struct SubGroupListView: View {
     let client: ClientGroup?
     @Binding var selectedTaskID: PersistentIdentifier?
+    var pinnedTaskID: PersistentIdentifier?
     var onTaskCreated: (PersistentIdentifier) -> Void
 
     @Environment(\.modelContext) private var modelContext
@@ -61,7 +62,7 @@ struct SubGroupListView: View {
     }
 
     private func taskList(for client: ClientGroup) -> some View {
-        List(selection: $selectedTaskID) {
+        List(selection: taskSelection) {
             ForEach(client.orderedSubGroups) { subGroup in
                 DisclosureGroup(isExpanded: expansion(for: subGroup)) {
                     ForEach(subGroup.orderedTasks) { task in
@@ -180,6 +181,20 @@ struct SubGroupListView: View {
         modelContext.persist()
     }
 
+    private var taskSelection: Binding<PersistentIdentifier?> {
+        Binding(
+            get: { selectedTaskID },
+            set: { newValue in
+                // The header click that creates a task also clears list selection.
+                // Keep the new task selected until its title has taken focus.
+                if newValue == nil, let pinnedTaskID, selectedTaskID == pinnedTaskID {
+                    return
+                }
+                selectedTaskID = newValue
+            }
+        )
+    }
+
     private func addTask(to subGroup: SubGroup) {
         let nextIndex = (subGroup.tasks.map(\.sortIndex).max() ?? -1) + 1
         let task = Task(title: "New Task", sortIndex: nextIndex, subGroup: subGroup)
@@ -187,21 +202,21 @@ struct SubGroupListView: View {
         if !subGroup.tasks.contains(where: { $0 === task }) {
             subGroup.tasks.append(task)
         }
-        let subgroupID = subGroup.persistentModelID
-        let taskID = task.persistentModelID
-        revealNewTask(taskID, in: subgroupID)
+        collapsedIDs.remove(subGroup.persistentModelID)
         modelContext.persist()
-        // Both the plus button and the context menu return focus to the list
-        // after the action. Re-select and focus once that handoff has finished.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            revealNewTask(taskID, in: subgroupID)
+        publishNewTask(task)
+        // The context menu and plus button restore key focus after the action returns.
+        // Publish again on the next turn, once that handoff has started.
+        DispatchQueue.main.async {
+            publishNewTask(task)
         }
     }
 
-    private func revealNewTask(_ taskID: PersistentIdentifier, in subgroupID: PersistentIdentifier) {
-        collapsedIDs.remove(subgroupID)
-        selectedTaskID = taskID
-        onTaskCreated(taskID)
+    private func publishNewTask(_ task: Task) {
+        if let subgroupID = task.subGroup?.persistentModelID {
+            collapsedIDs.remove(subgroupID)
+        }
+        onTaskCreated(task.persistentModelID)
     }
 
     private func drop(_ drag: RowDrag, on task: Task, before: Bool) -> Bool {
