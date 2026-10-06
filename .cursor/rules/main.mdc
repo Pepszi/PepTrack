@@ -1,0 +1,22 @@
+---
+alwaysApply: true
+---
+
+# PepTrack macOS Development Rules
+
+## 1. Core Architecture & Data (SwiftData)
+- Always use **SwiftData** for persistent state management. Never use UserDefaults or JSON files for complex entities.
+- Enforce strict relational schemas: `ClientGroup` -> has many `SubGroup` -> has many `Task`.
+- Use `@Relationship(.cascade)` on parent models to prevent orphaned data when deleting groups.
+- Ensure all model mutations occur on the proper context; explicitly call `try? modelContext.save()` when updating critical task metrics or stopping timers.
+
+## 2. Performance & UI Constraints
+- **Zero-Lag Timers:** Isolate task timer states to lightweight child views. Never trigger a full-screen, top-level View hierarchy redraw on every 1-second timer tick.
+- **Mac-Native Design:** Stick strictly to macOS 15+ Sequoia design paradigms. Use native three-column layouts (`NavigationSplitView`), sidebars, standard disclosure accordions, and system SF Symbols.
+- Avoid wrapping views in heavy custom containers if native SwiftUI options (`List`, `DisclosureGroup`, `Form`) suffice.
+- Provide smooth hover states, context menus, and inline name editing for a frictionless UX.
+
+## 3. Code Standards & Patterns
+- Keep files cleanly separated by role: Models (`*Model.swift`), Views (`*View.swift`), and Helpers/Components.
+- Write explicit type signatures. Prefer safe unwrap patterns (`if let`, `guard let`) over force-unwrapped optionals (`!`).
+- Prioritize clean, readable, self-documenting code. Do not write verbose comments unless explaining complex architectural workarounds.
