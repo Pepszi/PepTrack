@@ -4,11 +4,12 @@ import SwiftUI
 struct SubGroupListView: View {
     let client: ClientGroup?
     @Binding var selectedTaskID: PersistentIdentifier?
+    @Binding var collapsedIDs: Set<PersistentIdentifier>
     var pinnedTaskID: PersistentIdentifier?
     var onTaskCreated: (PersistentIdentifier) -> Void
 
     @Environment(\.modelContext) private var modelContext
-    @State private var collapsedIDs: Set<PersistentIdentifier> = []
+    @AppStorage("hideCompletedTasks") private var hideCompletedTasks = false
     @State private var subGroupPendingDeletion: SubGroup?
     @State private var taskPendingDeletion: Task?
 
@@ -36,6 +37,14 @@ struct SubGroupListView: View {
         }
         .navigationTitle(client?.name ?? "Tasks")
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Toggle(isOn: $hideCompletedTasks) {
+                    Label("Hide Completed", systemImage: "checkmark.circle")
+                }
+                .toggleStyle(.button)
+                .disabled(client == nil)
+                .help(hideCompletedTasks ? "Show completed tasks" : "Hide completed tasks")
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button(action: addSubGroup) {
                     Label("Add Subgroup", systemImage: "folder.badge.plus")
@@ -65,7 +74,7 @@ struct SubGroupListView: View {
         List(selection: taskSelection) {
             ForEach(client.orderedSubGroups) { subGroup in
                 DisclosureGroup(isExpanded: expansion(for: subGroup)) {
-                    ForEach(subGroup.orderedTasks) { task in
+                    ForEach(visibleTasks(in: subGroup)) { task in
                         ReorderableRow(
                             drag: RowDrag(kind: .task, id: task.persistentModelID),
                             previewTitle: task.title.isEmpty ? "Untitled Task" : task.title
@@ -99,7 +108,10 @@ struct SubGroupListView: View {
                     ) { drag, before in
                         drop(drag, on: subGroup, before: before)
                     } content: {
-                        SubGroupHeader(subGroup: subGroup) {
+                        SubGroupHeader(
+                            subGroup: subGroup,
+                            taskCount: visibleTasks(in: subGroup).count
+                        ) {
                             addTask(to: subGroup)
                         }
                         .contextMenu {
@@ -115,6 +127,7 @@ struct SubGroupListView: View {
             }
         }
         .listStyle(.inset)
+        .animation(.smooth(duration: 0.2), value: hideCompletedTasks)
         .alert(
             "Delete \(pendingTaskTitle)?",
             isPresented: taskDeleteAlertPresented
@@ -157,6 +170,12 @@ struct SubGroupListView: View {
                 }
             }
         )
+    }
+
+    private func visibleTasks(in subGroup: SubGroup) -> [Task] {
+        let tasks = subGroup.orderedTasks
+        guard hideCompletedTasks else { return tasks }
+        return tasks.filter { $0.status != .completed }
     }
 
     private func expansion(for subGroup: SubGroup) -> Binding<Bool> {
@@ -333,6 +352,7 @@ struct SubGroupListView: View {
 
 private struct SubGroupHeader: View {
     @Bindable var subGroup: SubGroup
+    var taskCount: Int
     var onAddTask: () -> Void
 
     @Environment(\.modelContext) private var modelContext
@@ -349,7 +369,7 @@ private struct SubGroupHeader: View {
                 .onSubmit {
                     modelContext.persist()
                 }
-            Text("\(subGroup.tasks.count)")
+            Text("\(taskCount)")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .monospacedDigit()
@@ -390,13 +410,11 @@ private struct ReorderableRow<Content: View>: View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .background {
-                GeometryReader { geometry in
-                    Color.clear
-                        .onAppear { rowHeight = geometry.size.height }
-                        .onChange(of: geometry.size.height) { _, newHeight in
-                            rowHeight = newHeight
-                        }
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { newHeight in
+                if rowHeight != newHeight {
+                    rowHeight = newHeight
                 }
             }
             .draggable(drag) {

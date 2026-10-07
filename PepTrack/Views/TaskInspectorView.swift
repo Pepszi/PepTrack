@@ -11,10 +11,10 @@ struct TaskInspectorView: View {
     var focusesTitle: Bool
     var onTitleFocusHandled: (Int) -> Void
     var onDelete: () -> Void
+    @Binding var isShowingTimeEntries: Bool
 
     @Environment(\.modelContext) private var modelContext
     @FocusState private var isTitleFocused: Bool
-    @State private var isShowingTimeEntries = false
     @State private var isConfirmingDelete = false
 
     var body: some View {
