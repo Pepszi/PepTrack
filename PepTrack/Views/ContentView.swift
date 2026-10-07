@@ -31,7 +31,7 @@ struct ContentView: View {
         NavigationSplitView {
             SidebarView(
                 clients: clients,
-                selectedClientID: $selectedClientID,
+                selectedClientID: clientSelection,
                 selectedTaskID: $selectedTaskID
             )
         } detail: {
@@ -111,11 +111,9 @@ struct ContentView: View {
         } message: {
             Text(transferFailure ?? "")
         }
-        .onChange(of: selectedClientID) { _, _ in
-            if !isRestoringWindow,
-               let selectedTask,
-               selectedTask.subGroup?.clientGroup?.persistentModelID != selectedClientID {
-                selectedTaskID = nil
+        .onChange(of: selectedClientID) { _, newClientID in
+            if !isRestoringWindow {
+                deselectTask(outside: newClientID)
             }
             saveWindowLocation()
         }
@@ -125,6 +123,12 @@ struct ContentView: View {
                     isShowingTimeEntries = false
                 }
                 saveWindowLocation()
+                return
+            }
+            if !isRestoringWindow,
+               let ownerID = taskAnywhere(newID)?.subGroup?.clientGroup?.persistentModelID,
+               ownerID != selectedClientID {
+                selectedTaskID = nil
                 return
             }
             if !isRestoringWindow {
@@ -190,6 +194,27 @@ struct ContentView: View {
     private var selectedClient: ClientGroup? {
         guard let selectedClientID else { return nil }
         return clients.first { $0.persistentModelID == selectedClientID }
+    }
+
+    /// Clears the task in the same update as the client, before the task list renders.
+    private var clientSelection: Binding<PersistentIdentifier?> {
+        Binding(
+            get: { selectedClientID },
+            set: { newClientID in
+                if newClientID != selectedClientID {
+                    deselectTask(outside: newClientID)
+                }
+                selectedClientID = newClientID
+            }
+        )
+    }
+
+    private func deselectTask(outside clientID: PersistentIdentifier?) {
+        guard !isRestoringWindow, let selectedTaskID else { return }
+        let ownerID = taskAnywhere(selectedTaskID)?.subGroup?.clientGroup?.persistentModelID
+        guard ownerID != clientID else { return }
+        self.selectedTaskID = nil
+        taskIDPendingTitleFocus = nil
     }
 
     private var selectedTask: Task? {
@@ -272,6 +297,10 @@ struct ContentView: View {
 
     private func storedTask(id data: Data) -> Task? {
         guard let id = PersistentIDArchive.decode(data) else { return nil }
+        return taskAnywhere(id)
+    }
+
+    private func taskAnywhere(_ id: PersistentIdentifier) -> Task? {
         for client in allClients() {
             for group in client.subGroups where !group.isDeleted {
                 if let task = group.tasks.first(where: { $0.persistentModelID == id && !$0.isDeleted }) {

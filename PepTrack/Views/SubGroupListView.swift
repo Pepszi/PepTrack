@@ -127,6 +127,7 @@ struct SubGroupListView: View {
             }
         }
         .listStyle(.inset)
+        .id(client.persistentModelID)
         .animation(.smooth(duration: 0.2), value: hideCompletedTasks)
         .alert(
             "Delete \(pendingTaskTitle)?",
@@ -202,7 +203,10 @@ struct SubGroupListView: View {
 
     private var taskSelection: Binding<PersistentIdentifier?> {
         Binding(
-            get: { selectedTaskID },
+            get: {
+                guard let selectedTaskID, task(for: selectedTaskID) != nil else { return nil }
+                return selectedTaskID
+            },
             set: { newValue in
                 // The header click that creates a task also clears list selection.
                 // Keep the new task selected until its title has taken focus.

@@ -56,11 +56,10 @@ extension Task {
         context.persist()
     }
 
-    func addTimeEntry(startedAt: Date, endedAt: Date, note: String, in context: ModelContext) {
+    func addTimeEntry(startedAt: Date, endedAt: Date, in context: ModelContext) {
         let entry = TimeEntry(
             startedAt: startedAt,
-            endedAt: endedAt,
-            note: trimmed(note)
+            endedAt: endedAt
         )
         attach(entry, in: context)
         refreshTrackedTotal()
@@ -71,12 +70,10 @@ extension Task {
         _ entry: TimeEntry,
         startedAt: Date,
         endedAt: Date?,
-        note: String,
         in context: ModelContext
     ) {
         entry.startedAt = startedAt
         entry.endedAt = endedAt
-        entry.note = trimmed(note)
         if endedAt == nil {
             isTimerRunning = true
             lastTimerStarted = startedAt
@@ -182,9 +179,5 @@ extension Task {
         if !timeEntries.contains(where: { $0 === entry }) {
             timeEntries.append(entry)
         }
-    }
-
-    private func trimmed(_ note: String) -> String {
-        note.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

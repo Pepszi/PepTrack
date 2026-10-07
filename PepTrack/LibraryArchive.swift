@@ -94,10 +94,15 @@ struct LibraryArchive: Codable {
     }
 
     func replaceContents(of context: ModelContext) throws {
+        // SwiftData still writes undo snapshots inside save() whenever an undo
+        // manager is attached, including after disableUndoRegistration().
+        // Replacing every object in that state crashes with
+        // "A snapshot should exist before creating a new snapshot for undo".
         let undoManager = context.undoManager
-        undoManager?.disableUndoRegistration()
+        undoManager?.removeAllActions()
+        context.undoManager = nil
         defer {
-            undoManager?.enableUndoRegistration()
+            context.undoManager = undoManager
             undoManager?.removeAllActions()
         }
 

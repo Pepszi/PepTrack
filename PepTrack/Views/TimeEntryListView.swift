@@ -68,18 +68,10 @@ private struct TimeEntryRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
             Button(action: onEdit) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(rangeLabel)
-                        .foregroundStyle(.primary)
-                    if !entry.note.isEmpty {
-                        Text(entry.note)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                Text(rangeLabel)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
