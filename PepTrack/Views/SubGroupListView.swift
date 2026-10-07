@@ -209,9 +209,24 @@ struct SubGroupListView: View {
                 if newValue == nil, let pinnedTaskID, selectedTaskID == pinnedTaskID {
                     return
                 }
+                // Group rows share this list selection. Their ids are not tasks,
+                // and resolving one as a task aborts.
+                if let newValue, task(for: newValue) == nil {
+                    return
+                }
                 selectedTaskID = newValue
             }
         )
+    }
+
+    private func task(for id: PersistentIdentifier) -> Task? {
+        guard let client else { return nil }
+        for group in client.subGroups where !group.isDeleted {
+            if let task = group.tasks.first(where: { $0.persistentModelID == id && !$0.isDeleted }) {
+                return task
+            }
+        }
+        return nil
     }
 
     private func addTask(to subGroup: SubGroup) {

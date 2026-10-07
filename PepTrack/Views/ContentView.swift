@@ -50,15 +50,6 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button("Export Library…", systemImage: "square.and.arrow.up", action: exportLibrary)
-                    Button("Import Library…", systemImage: "square.and.arrow.down", action: importLibrary)
-                } label: {
-                    Label("Library", systemImage: "archivebox")
-                }
-                .help("Export or import the whole library")
-            }
-            ToolbarItem(placement: .primaryAction) {
                 Button {
                     isInspectorPresented.toggle()
                 } label: {
@@ -213,11 +204,9 @@ struct ContentView: View {
     }
 
     private func task(for id: PersistentIdentifier) -> PepTrack.Task? {
-        if let task: PepTrack.Task = modelContext.registeredModel(for: id) {
-            return task
-        }
-        for folder in selectedClient?.subGroups ?? [] {
-            if let task = folder.tasks.first(where: { $0.persistentModelID == id }) {
+        let folders = selectedClient?.subGroups ?? allClients().flatMap(\.subGroups)
+        for folder in folders where !folder.isDeleted {
+            if let task = folder.tasks.first(where: { $0.persistentModelID == id && !$0.isDeleted }) {
                 return task
             }
         }
