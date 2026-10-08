@@ -9,7 +9,10 @@ import AppKit
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
-    @Query(sort: \ClientGroup.createdAt) private var clients: [ClientGroup]
+    @Query(sort: [
+        SortDescriptor(\ClientGroup.sortIndex),
+        SortDescriptor(\ClientGroup.createdAt)
+    ]) private var clients: [ClientGroup]
 
     @State private var selectedClientID: PersistentIdentifier?
     @State private var selectedTaskID: PersistentIdentifier?
@@ -392,7 +395,10 @@ struct ContentView: View {
         do {
             try archive.replaceContents(of: modelContext)
             let stored = try modelContext.fetch(
-                FetchDescriptor<ClientGroup>(sortBy: [SortDescriptor(\.createdAt)])
+                FetchDescriptor<ClientGroup>(sortBy: [
+                    SortDescriptor(\.sortIndex),
+                    SortDescriptor(\.createdAt)
+                ])
             )
             selectedClientID = stored.first?.persistentModelID
         } catch {

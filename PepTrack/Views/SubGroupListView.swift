@@ -271,6 +271,8 @@ struct SubGroupListView: View {
         case .task:
             guard let dragged = draggedTask(from: drag) else { return false }
             return move(dragged, into: folder, beside: nil, before: before)
+        case .client:
+            return false
         }
     }
 
@@ -416,7 +418,7 @@ private struct SubGroupHeader: View {
     }
 }
 
-private struct ReorderableRow<Content: View>: View {
+struct ReorderableRow<Content: View>: View {
     let drag: RowDrag
     let previewTitle: String
     let onDrop: (RowDrag, Bool) -> Bool

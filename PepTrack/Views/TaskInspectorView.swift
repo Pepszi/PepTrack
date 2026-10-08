@@ -37,8 +37,13 @@ struct TaskInspectorView: View {
                     }
                 Picker("Status", selection: $task.status) {
                     ForEach(TaskStatus.allCases) { status in
-                        Label(status.title, systemImage: status.symbolName)
-                            .tag(status)
+                        Label {
+                            Text(status.title)
+                        } icon: {
+                            status.menuIcon
+                                .foregroundStyle(status.tint)
+                        }
+                        .tag(status)
                     }
                 }
             }

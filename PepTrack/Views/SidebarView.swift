@@ -12,13 +12,20 @@ struct SidebarView: View {
     var body: some View {
         List(selection: $selectedClientID) {
             ForEach(clients) { client in
-                ClientRow(client: client)
-                    .tag(client.persistentModelID)
-                    .contextMenu {
-                        Button("Delete Client", role: .destructive) {
-                            clientPendingDeletion = client
+                ReorderableRow(
+                    drag: RowDrag(kind: .client, id: client.persistentModelID),
+                    previewTitle: client.name.isEmpty ? "Untitled Client" : client.name
+                ) { drag, before in
+                    drop(drag, on: client, before: before)
+                } content: {
+                    ClientRow(client: client)
+                        .contextMenu {
+                            Button("Delete Client", role: .destructive) {
+                                clientPendingDeletion = client
+                            }
                         }
-                    }
+                }
+                .tag(client.persistentModelID)
             }
         }
         .listStyle(.sidebar)
@@ -69,11 +76,42 @@ struct SidebarView: View {
     }
 
     private func addClient() {
-        let client = ClientGroup(name: "New Client")
+        let nextIndex = (clients.map(\.sortIndex).max() ?? -1) + 1
+        let client = ClientGroup(name: "New Client", sortIndex: nextIndex)
         modelContext.insert(client)
         selectedClientID = client.persistentModelID
         selectedTaskID = nil
         modelContext.persist()
+    }
+
+    private func drop(_ drag: RowDrag, on target: ClientGroup, before: Bool) -> Bool {
+        guard drag.kind == .client, let dragged = client(for: drag) else { return false }
+        return move(dragged, beside: target, before: before)
+    }
+
+    private func move(_ client: ClientGroup, beside target: ClientGroup, before: Bool) -> Bool {
+        guard client.persistentModelID != target.persistentModelID else { return false }
+        var ordered = clients.filter { $0.persistentModelID != client.persistentModelID }
+        guard let index = ordered.firstIndex(where: { $0.persistentModelID == target.persistentModelID }) else {
+            return false
+        }
+        ordered.insert(client, at: before ? index : index + 1)
+        applyOrder(ordered)
+        return true
+    }
+
+    private func applyOrder(_ ordered: [ClientGroup]) {
+        withAnimation {
+            for (index, client) in ordered.enumerated() where client.sortIndex != index {
+                client.sortIndex = index
+            }
+        }
+        modelContext.persist()
+    }
+
+    private func client(for drag: RowDrag) -> ClientGroup? {
+        guard let id = drag.persistentID else { return nil }
+        return clients.first { $0.persistentModelID == id }
     }
 
     private func delete(_ client: ClientGroup) {

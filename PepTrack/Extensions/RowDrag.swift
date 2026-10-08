@@ -7,6 +7,7 @@ nonisolated struct RowDrag: Codable, Transferable {
     enum Kind: String, Codable {
         case task
         case folder
+        case client
     }
 
     var kind: Kind

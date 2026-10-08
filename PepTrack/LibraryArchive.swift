@@ -19,6 +19,8 @@ struct LibraryArchive: Codable {
     struct ClientRecord: Codable {
         var name: String
         var createdAt: Date
+        /// Optional so archives written before clients could be reordered still import.
+        var sortIndex: Int?
         var groups: [GroupRecord]
     }
 
@@ -82,7 +84,10 @@ struct LibraryArchive: Codable {
 
     static func snapshot(of context: ModelContext) -> LibraryArchive {
         let stored = (try? context.fetch(
-            FetchDescriptor<ClientGroup>(sortBy: [SortDescriptor(\.createdAt)])
+            FetchDescriptor<ClientGroup>(sortBy: [
+                SortDescriptor(\.sortIndex),
+                SortDescriptor(\.createdAt)
+            ])
         )) ?? []
         return LibraryArchive(
             format: formatID,
@@ -141,7 +146,11 @@ struct LibraryArchive: Codable {
     }
 
     private func insert(_ record: ClientRecord, into context: ModelContext) {
-        let client = ClientGroup(name: record.name, createdAt: record.createdAt)
+        let client = ClientGroup(
+            name: record.name,
+            createdAt: record.createdAt,
+            sortIndex: record.sortIndex ?? 0
+        )
         context.insert(client)
 
         for groupRecord in record.groups {
@@ -212,6 +221,7 @@ extension LibraryArchive.ClientRecord {
     init(_ client: ClientGroup) {
         name = client.name
         createdAt = client.createdAt
+        sortIndex = client.sortIndex
         groups = client.orderedSubGroups
             .filter { !$0.isDeleted }
             .map { LibraryArchive.GroupRecord($0) }

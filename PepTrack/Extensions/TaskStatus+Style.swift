@@ -1,5 +1,9 @@
 import SwiftUI
 
+#if os(macOS)
+import AppKit
+#endif
+
 extension TaskStatus {
     var title: String {
         switch self {
@@ -33,4 +37,38 @@ extension TaskStatus {
         case .completed: Color(red: 43 / 255, green: 140 / 255, blue: 94 / 255)
         }
     }
+
+    /// Colored status symbol for menus. Popup menus redraw template images in the label color,
+    /// so this bakes in the same tint the task rows use.
+    var menuIcon: Image {
+        #if os(macOS)
+        Image(nsImage: tintedMenuSymbol).renderingMode(.original)
+        #else
+        Image(systemName: symbolName)
+        #endif
+    }
+
+    #if os(macOS)
+    private var tintedMenuSymbol: NSImage {
+        let color = NSColor(tint)
+        let base = NSImage(systemSymbolName: symbolName, accessibilityDescription: title) ?? NSImage()
+        let symbol = base.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        ) ?? base
+        let size = symbol.size == .zero ? NSSize(width: 13, height: 13) : symbol.size
+        let image = NSImage(size: size, flipped: false) { rect in
+            color.setFill()
+            rect.fill()
+            symbol.draw(
+                in: rect,
+                from: NSRect(origin: .zero, size: symbol.size),
+                operation: .destinationIn,
+                fraction: 1
+            )
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+    #endif
 }
