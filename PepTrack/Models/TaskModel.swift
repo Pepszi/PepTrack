@@ -15,6 +15,7 @@ enum TaskStatus: String, Codable, CaseIterable, Identifiable {
 @Model
 final class Task {
     var title: String
+    var details: String = ""
     var status: TaskStatus
     var startDate: Date?
     var endDate: Date?
@@ -33,6 +34,7 @@ final class Task {
 
     init(
         title: String,
+        details: String = "",
         status: TaskStatus = .toDo,
         startDate: Date? = nil,
         endDate: Date? = nil,
@@ -47,6 +49,7 @@ final class Task {
         subGroup: SubGroup? = nil
     ) {
         self.title = title
+        self.details = details
         self.status = status
         self.startDate = startDate
         self.endDate = endDate

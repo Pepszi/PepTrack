@@ -43,6 +43,11 @@ struct TaskInspectorView: View {
                 }
             }
 
+            Section("Description") {
+                TextField("Description", text: $task.details, axis: .vertical)
+                    .lineLimit(3...8)
+            }
+
             Section("Schedule") {
                 OptionalDateRow(title: "Start", date: $task.startDate)
                 OptionalDateRow(title: "End", date: $task.endDate)
@@ -118,6 +123,9 @@ struct TaskInspectorView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This task and its time entries will be removed.")
+        }
+        .onChange(of: task.details) { _, _ in
+            modelContext.persist()
         }
         .onChange(of: task.status) { _, _ in
             modelContext.persist()

@@ -31,6 +31,8 @@ struct LibraryArchive: Codable {
 
     struct TaskRecord: Codable {
         var title: String
+        /// Plain-text task description. Optional so archives written before this field still import.
+        var details: String?
         var status: TaskStatus
         var startDate: Date?
         var endDate: Date?
@@ -43,6 +45,23 @@ struct LibraryArchive: Codable {
         var createdAt: Date
         var sortIndex: Int
         var timeEntries: [TimeEntryRecord]
+
+        enum CodingKeys: String, CodingKey {
+            case title
+            case details = "description"
+            case status
+            case startDate
+            case endDate
+            case timeEstimateHours
+            case actualTimeTracked
+            case isTimerRunning
+            case lastTimerStarted
+            case budget
+            case isInvoiced
+            case createdAt
+            case sortIndex
+            case timeEntries
+        }
     }
 
     struct TimeEntryRecord: Codable {
@@ -140,6 +159,7 @@ struct LibraryArchive: Codable {
             for taskRecord in groupRecord.tasks {
                 let task = Task(
                     title: taskRecord.title,
+                    details: taskRecord.details ?? "",
                     status: taskRecord.status,
                     startDate: taskRecord.startDate,
                     endDate: taskRecord.endDate,
@@ -212,6 +232,7 @@ extension LibraryArchive.GroupRecord {
 extension LibraryArchive.TaskRecord {
     init(_ task: Task) {
         title = task.title
+        details = task.details
         status = task.status
         startDate = task.startDate
         endDate = task.endDate
