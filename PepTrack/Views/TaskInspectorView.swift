@@ -167,8 +167,7 @@ struct TaskInspectorView: View {
             task.stopTimer(in: modelContext)
         }
         onDelete()
-        modelContext.delete(task)
-        modelContext.persist()
+        modelContext.deleteAndPersist(task)
     }
 }
 

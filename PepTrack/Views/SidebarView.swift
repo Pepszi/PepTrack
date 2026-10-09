@@ -119,9 +119,8 @@ struct SidebarView: View {
             selectedClientID = nil
             selectedTaskID = nil
         }
-        modelContext.delete(client)
         clientPendingDeletion = nil
-        modelContext.persist()
+        modelContext.deleteAndPersist(client)
     }
 }
 

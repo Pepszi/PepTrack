@@ -353,8 +353,7 @@ struct SubGroupListView: View {
         if task.isTimerRunning {
             task.stopTimer(in: modelContext)
         }
-        modelContext.delete(task)
-        modelContext.persist()
+        modelContext.deleteAndPersist(task)
     }
 
     private func delete(_ subGroup: SubGroup) {
@@ -365,9 +364,8 @@ struct SubGroupListView: View {
         for task in subGroup.tasks where task.isTimerRunning {
             task.stopTimer(in: modelContext)
         }
-        modelContext.delete(subGroup)
         subGroupPendingDeletion = nil
-        modelContext.persist()
+        modelContext.deleteAndPersist(subGroup)
     }
 }
 
