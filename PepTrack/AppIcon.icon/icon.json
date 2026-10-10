@@ -1,0 +1,25 @@
+{
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "glass" : false,
+          "image-name" : "icon.png",
+          "name" : "Mark"
+        }
+      ],
+      "name" : "Mark",
+      "shadow" : {
+        "kind" : "none",
+        "opacity" : 0
+      },
+      "specular" : false
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [
+      "macOS",
+      "iOS"
+    ]
+  }
+}

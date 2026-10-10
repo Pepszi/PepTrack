@@ -10,8 +10,8 @@ struct SubGroupListView: View {
 
     @Environment(\.modelContext) private var modelContext
     @AppStorage("hideCompletedTasks") private var hideCompletedTasks = false
-    @State private var subGroupPendingDeletion: SubGroup?
-    @State private var taskPendingDeletion: Task?
+    @State private var selectedRowIDs: Set<PersistentIdentifier> = []
+    @State private var pendingDeletion: PendingDeletion?
 
     var body: some View {
         Group {
@@ -38,12 +38,33 @@ struct SubGroupListView: View {
         .navigationTitle(client?.name ?? "Tasks")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                Button(action: deleteSelection) {
+                    Label("Delete", systemImage: "trash")
+                }
+                .disabled(selectedRowIDs.isEmpty)
+                .help(deleteHelp)
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Toggle(isOn: $hideCompletedTasks) {
                     Label("Hide Completed", systemImage: "checkmark.circle")
                 }
                 .toggleStyle(.button)
                 .disabled(client == nil)
                 .help(hideCompletedTasks ? "Show completed tasks" : "Hide completed tasks")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button("Expand All", systemImage: "chevron.down", action: expandAllGroups)
+                        .disabled(allGroupsExpanded)
+                        .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                    Button("Collapse All", systemImage: "chevron.right", action: collapseAllGroups)
+                        .disabled(allGroupsCollapsed)
+                        .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+                } label: {
+                    Label("Groups", systemImage: "rectangle.expand.vertical")
+                }
+                .disabled(client?.subGroups.isEmpty ?? true)
+                .help("Expand or collapse every group")
             }
             ToolbarItem(placement: .primaryAction) {
                 Button(action: addSubGroup) {
@@ -53,25 +74,21 @@ struct SubGroupListView: View {
                 .help("Add Subgroup")
             }
         }
-        .alert(
-            "Delete \(subGroupPendingDeletion?.name ?? "Group")?",
-            isPresented: deleteAlertPresented
-        ) {
-            Button("Delete", role: .destructive) {
-                if let subGroupPendingDeletion {
-                    delete(subGroupPendingDeletion)
-                }
-            }
-            Button("Cancel", role: .cancel) {
-                subGroupPendingDeletion = nil
-            }
-        } message: {
-            Text("Tasks inside this group will be removed.")
+        .onDeleteCommand(perform: selectedRowIDs.isEmpty ? nil : { deleteSelection() })
+        .onChange(of: selectedTaskID, initial: true) { _, newID in
+            adoptExternalTaskSelection(newID)
+        }
+        .onChange(of: clientIdentity) { _, _ in
+            selectedRowIDs = []
+        }
+        .onChange(of: hideCompletedTasks) { _, isHiding in
+            guard isHiding else { return }
+            selectedRowIDs.subtract(completedTaskIDs)
         }
     }
 
     private func taskList(for client: ClientGroup) -> some View {
-        List(selection: taskSelection) {
+        List(selection: $selectedRowIDs) {
             ForEach(client.orderedSubGroups) { subGroup in
                 DisclosureGroup(isExpanded: expansion(for: subGroup)) {
                     ForEach(visibleTasks(in: subGroup)) { task in
@@ -82,11 +99,11 @@ struct SubGroupListView: View {
                             drop(drag, on: task, before: before)
                         } content: {
                             TaskRowView(task: task) {
-                                selectedTaskID = task.persistentModelID
+                                selectedRowIDs = [task.persistentModelID]
                             }
                             .contextMenu {
                                 Button(task.isTimerRunning ? "Pause Timer" : "Start Timer") {
-                                    selectedTaskID = task.persistentModelID
+                                    selectedRowIDs = [task.persistentModelID]
                                     task.toggleTimer(in: modelContext)
                                 }
                                 Button(task.isInvoiced ? "Mark Not Invoiced" : "Mark Invoiced") {
@@ -94,8 +111,8 @@ struct SubGroupListView: View {
                                     modelContext.persist()
                                 }
                                 Divider()
-                                Button("Delete Task", role: .destructive) {
-                                    taskPendingDeletion = task
+                                Button(deleteTitle(including: task.persistentModelID, single: "Delete Task"), role: .destructive) {
+                                    stageDeletion(including: task.persistentModelID)
                                 }
                             }
                         }
@@ -118,59 +135,38 @@ struct SubGroupListView: View {
                             Button("Add Task") {
                                 addTask(to: subGroup)
                             }
-                            Button("Delete Group", role: .destructive) {
-                                subGroupPendingDeletion = subGroup
+                            Divider()
+                            Button("Expand All", action: expandAllGroups)
+                                .disabled(allGroupsExpanded)
+                            Button("Collapse All", action: collapseAllGroups)
+                                .disabled(allGroupsCollapsed)
+                            Divider()
+                            Button(deleteTitle(including: subGroup.persistentModelID, single: "Delete Group"), role: .destructive) {
+                                stageDeletion(including: subGroup.persistentModelID)
                             }
                         }
                     }
                 }
+                .tag(subGroup.persistentModelID)
             }
         }
         .listStyle(.inset)
         .id(client.persistentModelID)
         .animation(.smooth(duration: 0.2), value: hideCompletedTasks)
+        .onChange(of: selectedRowIDs) { _, ids in
+            applyRowSelection(ids)
+        }
         .alert(
-            "Delete \(pendingTaskTitle)?",
-            isPresented: taskDeleteAlertPresented
+            deletionTitle,
+            isPresented: deletionAlertPresented
         ) {
-            Button("Delete", role: .destructive) {
-                if let taskPendingDeletion {
-                    delete(taskPendingDeletion)
-                }
-            }
+            Button("Delete", role: .destructive, action: performDeletion)
             Button("Cancel", role: .cancel) {
-                taskPendingDeletion = nil
+                pendingDeletion = nil
             }
         } message: {
-            Text("This task and its time entries will be removed.")
+            Text(deletionMessage)
         }
-    }
-
-    private var pendingTaskTitle: String {
-        let title = taskPendingDeletion?.title ?? ""
-        return title.isEmpty ? "Untitled Task" : title
-    }
-
-    private var taskDeleteAlertPresented: Binding<Bool> {
-        Binding(
-            get: { taskPendingDeletion != nil },
-            set: { isPresented in
-                if !isPresented {
-                    taskPendingDeletion = nil
-                }
-            }
-        )
-    }
-
-    private var deleteAlertPresented: Binding<Bool> {
-        Binding(
-            get: { subGroupPendingDeletion != nil },
-            set: { isPresented in
-                if !isPresented {
-                    subGroupPendingDeletion = nil
-                }
-            }
-        )
     }
 
     private func visibleTasks(in subGroup: SubGroup) -> [Task] {
@@ -192,6 +188,34 @@ struct SubGroupListView: View {
         )
     }
 
+    private var allGroupsExpanded: Bool {
+        guard let client, !client.subGroups.isEmpty else { return true }
+        return client.subGroups.allSatisfy { !collapsedIDs.contains($0.persistentModelID) }
+    }
+
+    private var allGroupsCollapsed: Bool {
+        guard let client, !client.subGroups.isEmpty else { return true }
+        return client.subGroups.allSatisfy { collapsedIDs.contains($0.persistentModelID) }
+    }
+
+    private func expandAllGroups() {
+        guard let client else { return }
+        withAnimation(.smooth(duration: 0.2)) {
+            for group in client.subGroups {
+                collapsedIDs.remove(group.persistentModelID)
+            }
+        }
+    }
+
+    private func collapseAllGroups() {
+        guard let client else { return }
+        withAnimation(.smooth(duration: 0.2)) {
+            for group in client.subGroups {
+                collapsedIDs.insert(group.persistentModelID)
+            }
+        }
+    }
+
     private func addSubGroup() {
         guard let client else { return }
         let nextIndex = (client.subGroups.map(\.sortIndex).max() ?? -1) + 1
@@ -201,26 +225,125 @@ struct SubGroupListView: View {
         modelContext.persist()
     }
 
-    private var taskSelection: Binding<PersistentIdentifier?> {
+    private var clientIdentity: PersistentIdentifier? {
+        client?.persistentModelID
+    }
+
+    private var deleteHelp: String {
+        switch selectedRowIDs.count {
+        case 0: "Delete"
+        case 1: "Delete Selected"
+        default: "Delete \(selectedRowIDs.count) Items"
+        }
+    }
+
+    private var deletionTitle: String {
+        guard let pendingDeletion else { return "Delete?" }
+        if pendingDeletion.groupIDs.count == 1, pendingDeletion.taskIDs.isEmpty {
+            return "Delete \(groupName(pendingDeletion.groupIDs[0]))?"
+        }
+        if pendingDeletion.taskIDs.count == 1, pendingDeletion.groupIDs.isEmpty {
+            return "Delete \(taskTitle(pendingDeletion.taskIDs[0]))?"
+        }
+        return "Delete \(pendingDeletion.groupIDs.count + pendingDeletion.taskIDs.count) Items?"
+    }
+
+    private var deletionMessage: String {
+        guard let pendingDeletion else { return "" }
+        switch (pendingDeletion.groupIDs.isEmpty, pendingDeletion.taskIDs.isEmpty) {
+        case (false, true):
+            return pendingDeletion.groupIDs.count == 1
+                ? "Tasks inside this group will be removed."
+                : "Tasks inside these groups will be removed."
+        case (true, false):
+            return pendingDeletion.taskIDs.count == 1
+                ? "This task and its time entries will be removed."
+                : "These tasks and their time entries will be removed."
+        default:
+            return "Selected groups are removed with every task inside them. Other selected tasks are removed with their time entries."
+        }
+    }
+
+    private var deletionAlertPresented: Binding<Bool> {
         Binding(
-            get: {
-                guard let selectedTaskID, task(for: selectedTaskID) != nil else { return nil }
-                return selectedTaskID
-            },
-            set: { newValue in
-                // The header click that creates a task also clears list selection.
-                // Keep the new task selected until its title has taken focus.
-                if newValue == nil, let pinnedTaskID, selectedTaskID == pinnedTaskID {
-                    return
+            get: { pendingDeletion != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingDeletion = nil
                 }
-                // Group rows share this list selection. Their ids are not tasks,
-                // and resolving one as a task aborts.
-                if let newValue, task(for: newValue) == nil {
-                    return
-                }
-                selectedTaskID = newValue
             }
         )
+    }
+
+    private var completedTaskIDs: Set<PersistentIdentifier> {
+        guard let client else { return [] }
+        return Set(client.subGroups.flatMap(\.tasks).filter { $0.status == .completed }.map(\.persistentModelID))
+    }
+
+    /// The header click that creates a task also clears list selection.
+    /// Keep that new task selected until its title has taken focus.
+    private func applyRowSelection(_ ids: Set<PersistentIdentifier>) {
+        if ids.isEmpty, let pinnedTaskID, selectedTaskID == pinnedTaskID {
+            selectedRowIDs = [pinnedTaskID]
+            return
+        }
+        if ids.count == 1, let id = ids.first, task(for: id) != nil {
+            if selectedTaskID != id {
+                selectedTaskID = id
+            }
+            return
+        }
+        if selectedTaskID != nil {
+            selectedTaskID = nil
+        }
+    }
+
+    private func adoptExternalTaskSelection(_ newID: PersistentIdentifier?) {
+        guard let newID else {
+            guard selectedRowIDs.count == 1, let only = selectedRowIDs.first, subGroup(for: only) == nil else {
+                return
+            }
+            selectedRowIDs = []
+            return
+        }
+        if selectedRowIDs != [newID] {
+            selectedRowIDs = [newID]
+        }
+    }
+
+    private func deleteTitle(including id: PersistentIdentifier, single: String) -> String {
+        guard selectedRowIDs.contains(id), selectedRowIDs.count > 1 else { return single }
+        return "Delete \(selectedRowIDs.count) Items"
+    }
+
+    private func deleteSelection() {
+        stageDeletion(of: selectedRowIDs)
+    }
+
+    private func stageDeletion(including id: PersistentIdentifier) {
+        if selectedRowIDs.contains(id), selectedRowIDs.count > 1 {
+            stageDeletion(of: selectedRowIDs)
+        } else {
+            stageDeletion(of: [id])
+        }
+    }
+
+    private func stageDeletion(of ids: Set<PersistentIdentifier>) {
+        guard let client, !ids.isEmpty else { return }
+        var groupIDs: [PersistentIdentifier] = []
+        var taskIDs: [PersistentIdentifier] = []
+        for group in client.orderedSubGroups where !group.isDeleted {
+            let groupID = group.persistentModelID
+            let groupIsSelected = ids.contains(groupID)
+            if groupIsSelected {
+                groupIDs.append(groupID)
+            }
+            for task in group.orderedTasks where !task.isDeleted && ids.contains(task.persistentModelID) && !groupIsSelected {
+                taskIDs.append(task.persistentModelID)
+            }
+        }
+        guard !groupIDs.isEmpty || !taskIDs.isEmpty else { return }
+        pendingDeletion = PendingDeletion(groupIDs: groupIDs, taskIDs: taskIDs)
     }
 
     private func task(for id: PersistentIdentifier) -> Task? {
@@ -342,31 +465,64 @@ struct SubGroupListView: View {
     }
 
     private func subGroup(for drag: RowDrag) -> SubGroup? {
-        guard let id = drag.persistentID, let client else { return nil }
-        return client.subGroups.first { $0.persistentModelID == id }
+        guard let id = drag.persistentID else { return nil }
+        return subGroup(for: id)
     }
 
-    private func delete(_ task: Task) {
-        if selectedTaskID == task.persistentModelID {
-            selectedTaskID = nil
+    private func subGroup(for id: PersistentIdentifier) -> SubGroup? {
+        guard let client else { return nil }
+        return client.subGroups.first { $0.persistentModelID == id && !$0.isDeleted }
+    }
+
+    private func groupName(_ id: PersistentIdentifier) -> String {
+        let name = subGroup(for: id)?.name ?? ""
+        return name.isEmpty ? "Untitled Group" : name
+    }
+
+    private func taskTitle(_ id: PersistentIdentifier) -> String {
+        let title = task(for: id)?.title ?? ""
+        return title.isEmpty ? "Untitled Task" : title
+    }
+
+    private func performDeletion() {
+        guard let pendingDeletion, let client else { return }
+        let groups = pendingDeletion.groupIDs.compactMap { subGroup(for: $0) }
+        let groupIDs = Set(groups.map(\.persistentModelID))
+        var tasks: [Task] = []
+        for group in client.subGroups where !group.isDeleted {
+            for task in group.tasks where !task.isDeleted && pendingDeletion.taskIDs.contains(task.persistentModelID) {
+                if let parentID = task.subGroup?.persistentModelID, groupIDs.contains(parentID) {
+                    continue
+                }
+                tasks.append(task)
+            }
         }
-        if task.isTimerRunning {
+
+        var seenTimers = Set<PersistentIdentifier>()
+        let runningTasks = tasks.filter(\.isTimerRunning) + groups.flatMap { group in
+            group.tasks.filter { $0.isTimerRunning && !$0.isDeleted }
+        }
+        for task in runningTasks where seenTimers.insert(task.persistentModelID).inserted {
             task.stopTimer(in: modelContext)
         }
-        modelContext.deleteAndPersist(task)
-    }
 
-    private func delete(_ subGroup: SubGroup) {
-        if let selectedTaskID,
-           subGroup.tasks.contains(where: { $0.persistentModelID == selectedTaskID }) {
+        var removedIDs = Set(pendingDeletion.groupIDs + pendingDeletion.taskIDs)
+        for group in groups {
+            removedIDs.formUnion(group.tasks.map(\.persistentModelID))
+            collapsedIDs.remove(group.persistentModelID)
+        }
+        if let selectedTaskID, removedIDs.contains(selectedTaskID) {
             self.selectedTaskID = nil
         }
-        for task in subGroup.tasks where task.isTimerRunning {
-            task.stopTimer(in: modelContext)
-        }
-        subGroupPendingDeletion = nil
-        modelContext.deleteAndPersist(subGroup)
+        selectedRowIDs.subtract(removedIDs)
+        self.pendingDeletion = nil
+        modelContext.deleteAndPersist(tasks.map { $0 as any PersistentModel } + groups.map { $0 as any PersistentModel })
     }
+}
+
+private struct PendingDeletion: Equatable {
+    var groupIDs: [PersistentIdentifier]
+    var taskIDs: [PersistentIdentifier]
 }
 
 private struct SubGroupHeader: View {
