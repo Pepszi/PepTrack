@@ -23,6 +23,16 @@
 				<string>application/json</string>
 			</dict>
 		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.peptrack.row</string>
+			<key>UTTypeDescription</key>
+			<string>PepTrack Row</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>

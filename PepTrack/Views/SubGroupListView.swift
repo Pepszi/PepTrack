@@ -12,6 +12,9 @@ struct SubGroupListView: View {
     @AppStorage("hideCompletedTasks") private var hideCompletedTasks = false
     @State private var selectedRowIDs: Set<PersistentIdentifier> = []
     @State private var pendingDeletion: PendingDeletion?
+    @State private var liftedID: PersistentIdentifier?
+    @State private var previewGroups: [SubGroup]?
+    @State private var previewTasks: [PersistentIdentifier: [Task]]?
 
     var body: some View {
         Group {
@@ -80,6 +83,7 @@ struct SubGroupListView: View {
         }
         .onChange(of: clientIdentity) { _, _ in
             selectedRowIDs = []
+            endDrag()
         }
         .onChange(of: hideCompletedTasks) { _, isHiding in
             guard isHiding else { return }
@@ -88,15 +92,17 @@ struct SubGroupListView: View {
     }
 
     private func taskList(for client: ClientGroup) -> some View {
-        List(selection: $selectedRowIDs) {
-            ForEach(client.orderedSubGroups) { subGroup in
+        List(selection: listSelection) {
+            ForEach(displayedGroups(of: client)) { subGroup in
                 DisclosureGroup(isExpanded: expansion(for: subGroup)) {
                     ForEach(visibleTasks(in: subGroup)) { task in
                         ReorderableRow(
                             drag: RowDrag(kind: .task, id: task.persistentModelID),
-                            previewTitle: task.title.isEmpty ? "Untitled Task" : task.title
-                        ) { drag, before in
-                            drop(drag, on: task, before: before)
+                            isLifted: liftedID == task.persistentModelID
+                        ) { before in
+                            hover(over: task, in: subGroup, before: before)
+                        } onDrop: {
+                            commitDrag()
                         } content: {
                             TaskRowView(task: task) {
                                 selectedRowIDs = [task.persistentModelID]
@@ -121,9 +127,11 @@ struct SubGroupListView: View {
                 } label: {
                     ReorderableRow(
                         drag: RowDrag(kind: .folder, id: subGroup.persistentModelID),
-                        previewTitle: subGroup.name.isEmpty ? "Untitled Group" : subGroup.name
-                    ) { drag, before in
-                        drop(drag, on: subGroup, before: before)
+                        isLifted: liftedID == subGroup.persistentModelID
+                    ) { before in
+                        hover(over: subGroup, before: before)
+                    } onDrop: {
+                        commitDrag()
                     } content: {
                         SubGroupHeader(
                             subGroup: subGroup,
@@ -150,6 +158,9 @@ struct SubGroupListView: View {
                 .tag(subGroup.persistentModelID)
             }
         }
+        .onDragRelease(isDragging: liftedID != nil) {
+            endDrag()
+        }
         .listStyle(.inset)
         .id(client.persistentModelID)
         .animation(.smooth(duration: 0.2), value: hideCompletedTasks)
@@ -169,8 +180,12 @@ struct SubGroupListView: View {
         }
     }
 
+    private func displayedGroups(of client: ClientGroup) -> [SubGroup] {
+        previewGroups ?? client.orderedSubGroups
+    }
+
     private func visibleTasks(in subGroup: SubGroup) -> [Task] {
-        let tasks = subGroup.orderedTasks
+        let tasks: [Task] = previewTasks?[subGroup.persistentModelID] ?? subGroup.orderedTasks
         guard hideCompletedTasks else { return tasks }
         return tasks.filter { $0.status != .completed }
     }
@@ -380,93 +395,142 @@ struct SubGroupListView: View {
         onTaskCreated(task.persistentModelID)
     }
 
-    private func drop(_ drag: RowDrag, on task: Task, before: Bool) -> Bool {
-        guard drag.kind == .task, let dragged = draggedTask(from: drag) else { return false }
-        guard let folder = task.subGroup else { return false }
-        return move(dragged, into: folder, beside: task, before: before)
+    /// Hides the highlight on the lifted row so its drop slot reads as empty, without changing the real selection.
+    private var listSelection: Binding<Set<PersistentIdentifier>> {
+        Binding(
+            get: {
+                guard let liftedID else { return selectedRowIDs }
+                return selectedRowIDs.subtracting([liftedID])
+            },
+            set: { newIDs in
+                guard liftedID == nil else { return }
+                selectedRowIDs = newIDs
+            }
+        )
     }
 
-    private func drop(_ drag: RowDrag, on folder: SubGroup, before: Bool) -> Bool {
-        switch drag.kind {
-        case .folder:
-            guard let dragged = subGroup(for: drag) else { return false }
-            return move(dragged, beside: folder, before: before)
-        case .task:
-            guard let dragged = draggedTask(from: drag) else { return false }
-            return move(dragged, into: folder, beside: nil, before: before)
-        case .client:
-            return false
+    private func lift(_ id: PersistentIdentifier) {
+        guard liftedID != id else { return }
+        logReorder("lift row")
+        previewGroups = nil
+        previewTasks = nil
+        liftedID = id
+    }
+
+    private func hover(over target: SubGroup, before: Bool) {
+        guard let liftedID else {
+            lift(target.persistentModelID)
+            return
+        }
+        guard let client else { return }
+        if let lifted = subGroup(for: liftedID) {
+            guard lifted.persistentModelID != target.persistentModelID else { return }
+            let current: [SubGroup] = displayedGroups(of: client)
+            var order: [SubGroup] = current.filter { $0.persistentModelID != liftedID }
+            guard let index = order.firstIndex(where: { $0.persistentModelID == target.persistentModelID }) else { return }
+            order.insert(lifted, at: before ? index : index + 1)
+            guard order.map(\.persistentModelID) != current.map(\.persistentModelID) else { return }
+            withAnimation(.smooth(duration: 0.2)) {
+                previewGroups = order
+            }
+        } else if let lifted = task(for: liftedID) {
+            var layout: [PersistentIdentifier: [Task]] = taskLayoutWithoutLifted()
+            let groups: [SubGroup] = displayedGroups(of: client)
+            if before,
+               let index = groups.firstIndex(where: { $0.persistentModelID == target.persistentModelID }),
+               index > 0,
+               !collapsedIDs.contains(groups[index - 1].persistentModelID) {
+                layout[groups[index - 1].persistentModelID, default: []].append(lifted)
+            } else {
+                layout[target.persistentModelID, default: []].insert(lifted, at: 0)
+            }
+            showTaskPreview(layout)
         }
     }
 
-    private func move(_ folder: SubGroup, beside target: SubGroup, before: Bool) -> Bool {
-        guard folder.persistentModelID != target.persistentModelID, let client else { return false }
-        var ordered = client.orderedSubGroups.filter { $0.persistentModelID != folder.persistentModelID }
-        guard let index = ordered.firstIndex(where: { $0.persistentModelID == target.persistentModelID }) else {
-            return false
+    private func hover(over target: Task, in group: SubGroup, before: Bool) {
+        guard let liftedID else {
+            lift(target.persistentModelID)
+            return
         }
-        ordered.insert(folder, at: before ? index : index + 1)
-        applyFolderOrder(ordered)
-        return true
+        guard liftedID != target.persistentModelID, let lifted = task(for: liftedID) else { return }
+        var layout: [PersistentIdentifier: [Task]] = taskLayoutWithoutLifted()
+        var tasks: [Task] = layout[group.persistentModelID] ?? []
+        guard let index = tasks.firstIndex(where: { $0.persistentModelID == target.persistentModelID }) else { return }
+        tasks.insert(lifted, at: before ? index : index + 1)
+        layout[group.persistentModelID] = tasks
+        showTaskPreview(layout)
     }
 
-    private func move(_ task: Task, into folder: SubGroup, beside target: Task?, before: Bool) -> Bool {
-        if let target, task.persistentModelID == target.persistentModelID {
-            return false
+    private func taskLayout() -> [PersistentIdentifier: [Task]] {
+        if let previewTasks {
+            return previewTasks
         }
-        let source = task.subGroup
-        if task.subGroup?.persistentModelID != folder.persistentModelID {
-            task.subGroup = folder
+        guard let client else { return [:] }
+        var layout: [PersistentIdentifier: [Task]] = [:]
+        for group in client.subGroups where !group.isDeleted {
+            layout[group.persistentModelID] = group.orderedTasks
         }
-        var ordered = folder.orderedTasks.filter { $0.persistentModelID != task.persistentModelID }
-        if let target, let index = ordered.firstIndex(where: { $0.persistentModelID == target.persistentModelID }) {
-            ordered.insert(task, at: before ? index : index + 1)
-        } else if before {
-            ordered.insert(task, at: 0)
-        } else {
-            ordered.append(task)
-        }
-        applyTaskOrder(ordered)
-        if let source, source.persistentModelID != folder.persistentModelID {
-            let remaining = source.orderedTasks.filter { $0.persistentModelID != task.persistentModelID }
-            applyTaskOrder(remaining)
-        }
-        collapsedIDs.remove(folder.persistentModelID)
-        modelContext.persist()
-        return true
+        return layout
     }
 
-    private func applyFolderOrder(_ folders: [SubGroup]) {
-        withAnimation {
-            for (index, folder) in folders.enumerated() where folder.sortIndex != index {
-                folder.sortIndex = index
+    private func taskLayoutWithoutLifted() -> [PersistentIdentifier: [Task]] {
+        taskLayout().mapValues { tasks in
+            tasks.filter { $0.persistentModelID != liftedID }
+        }
+    }
+
+    private func showTaskPreview(_ layout: [PersistentIdentifier: [Task]]) {
+        let currentIDs = taskLayout().mapValues { $0.map(\.persistentModelID) }
+        guard layout.mapValues({ $0.map(\.persistentModelID) }) != currentIDs else { return }
+        withAnimation(.smooth(duration: 0.2)) {
+            previewTasks = layout
+        }
+    }
+
+    private func commitDrag() {
+        if let previewGroups {
+            for (index, group) in previewGroups.enumerated() where group.sortIndex != index {
+                group.sortIndex = index
+            }
+        }
+        if let previewTasks {
+            for (groupID, tasks) in previewTasks {
+                guard let group = subGroup(for: groupID) else { continue }
+                for (index, task) in tasks.enumerated() {
+                    if task.subGroup?.persistentModelID != groupID {
+                        task.subGroup = group
+                    }
+                    if task.sortIndex != index {
+                        task.sortIndex = index
+                    }
+                }
+                if tasks.contains(where: { $0.persistentModelID == liftedID }) {
+                    collapsedIDs.remove(groupID)
+                }
             }
         }
         modelContext.persist()
+        endDrag(animatesReturn: false)
     }
 
-    private func applyTaskOrder(_ tasks: [Task]) {
-        withAnimation {
-            for (index, task) in tasks.enumerated() where task.sortIndex != index {
-                task.sortIndex = index
+    /// The lifted row reappears in one frame so it reads as landing in its slot.
+    /// Only a cancelled drag animates, sliding rows back to their saved order.
+    private func endDrag(animatesReturn: Bool = true) {
+        guard liftedID != nil || previewGroups != nil || previewTasks != nil else { return }
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) {
+            liftedID = nil
+            if !animatesReturn {
+                previewGroups = nil
+                previewTasks = nil
             }
         }
-        modelContext.persist()
-    }
-
-    private func draggedTask(from drag: RowDrag) -> Task? {
-        guard let id = drag.persistentID, let client else { return nil }
-        for folder in client.subGroups {
-            if let task = folder.tasks.first(where: { $0.persistentModelID == id }) {
-                return task
-            }
+        withAnimation(.smooth(duration: 0.2)) {
+            previewGroups = nil
+            previewTasks = nil
         }
-        return nil
-    }
-
-    private func subGroup(for drag: RowDrag) -> SubGroup? {
-        guard let id = drag.persistentID else { return nil }
-        return subGroup(for: id)
     }
 
     private func subGroup(for id: PersistentIdentifier) -> SubGroup? {
@@ -572,46 +636,5 @@ private struct SubGroupHeader: View {
         .onHover { isHoveringPlus = $0 }
         .help("Add Task")
         .accessibilityLabel("Add Task")
-    }
-}
-
-struct ReorderableRow<Content: View>: View {
-    let drag: RowDrag
-    let previewTitle: String
-    let onDrop: (RowDrag, Bool) -> Bool
-    @ViewBuilder var content: () -> Content
-
-    @State private var isTargeted = false
-    @State private var rowHeight: CGFloat = 0
-
-    var body: some View {
-        content()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.size.height
-            } action: { newHeight in
-                if rowHeight != newHeight {
-                    rowHeight = newHeight
-                }
-            }
-            .draggable(drag) {
-                Text(previewTitle)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 6))
-            }
-            .dropDestination(for: RowDrag.self) { items, location in
-                guard let item = items.first else { return false }
-                let before = location.y < rowHeight / 2
-                return onDrop(item, before)
-            } isTargeted: { isTargeted = $0 }
-            .overlay(alignment: .top) {
-                if isTargeted {
-                    Rectangle()
-                        .fill(Color.accentColor)
-                        .frame(height: 2)
-                }
-            }
     }
 }

@@ -8,15 +8,19 @@ struct SidebarView: View {
 
     @Environment(\.modelContext) private var modelContext
     @State private var clientPendingDeletion: ClientGroup?
+    @State private var liftedClientID: PersistentIdentifier?
+    @State private var previewClients: [ClientGroup]?
 
     var body: some View {
-        List(selection: $selectedClientID) {
-            ForEach(clients) { client in
+        List(selection: listSelection) {
+            ForEach(displayedClients) { client in
                 ReorderableRow(
                     drag: RowDrag(kind: .client, id: client.persistentModelID),
-                    previewTitle: client.name.isEmpty ? "Untitled Client" : client.name
-                ) { drag, before in
-                    drop(drag, on: client, before: before)
+                    isLifted: liftedClientID == client.persistentModelID
+                ) { before in
+                    hover(over: client, before: before)
+                } onDrop: {
+                    commitDrag()
                 } content: {
                     ClientRow(client: client)
                         .contextMenu {
@@ -27,6 +31,9 @@ struct SidebarView: View {
                 }
                 .tag(client.persistentModelID)
             }
+        }
+        .onDragRelease(isDragging: liftedClientID != nil) {
+            endDrag()
         }
         .listStyle(.sidebar)
         .navigationTitle("Clients")
@@ -84,34 +91,73 @@ struct SidebarView: View {
         modelContext.persist()
     }
 
-    private func drop(_ drag: RowDrag, on target: ClientGroup, before: Bool) -> Bool {
-        guard drag.kind == .client, let dragged = client(for: drag) else { return false }
-        return move(dragged, beside: target, before: before)
+    private var displayedClients: [ClientGroup] {
+        previewClients ?? clients
     }
 
-    private func move(_ client: ClientGroup, beside target: ClientGroup, before: Bool) -> Bool {
-        guard client.persistentModelID != target.persistentModelID else { return false }
-        var ordered = clients.filter { $0.persistentModelID != client.persistentModelID }
-        guard let index = ordered.firstIndex(where: { $0.persistentModelID == target.persistentModelID }) else {
-            return false
-        }
-        ordered.insert(client, at: before ? index : index + 1)
-        applyOrder(ordered)
-        return true
-    }
-
-    private func applyOrder(_ ordered: [ClientGroup]) {
-        withAnimation {
-            for (index, client) in ordered.enumerated() where client.sortIndex != index {
-                client.sortIndex = index
+    /// Hides the highlight on the lifted row so its drop slot reads as empty, without changing the real selection.
+    private var listSelection: Binding<PersistentIdentifier?> {
+        Binding(
+            get: {
+                guard let liftedClientID, selectedClientID == liftedClientID else { return selectedClientID }
+                return nil
+            },
+            set: { newID in
+                guard liftedClientID == nil else { return }
+                selectedClientID = newID
             }
+        )
+    }
+
+    private func lift(_ client: ClientGroup) {
+        let id: PersistentIdentifier = client.persistentModelID
+        guard liftedClientID != id else { return }
+        logReorder("lift client")
+        previewClients = nil
+        liftedClientID = id
+    }
+
+    private func hover(over target: ClientGroup, before: Bool) {
+        guard let liftedClientID else {
+            lift(target)
+            return
+        }
+        guard liftedClientID != target.persistentModelID,
+              let lifted = clients.first(where: { $0.persistentModelID == liftedClientID }) else { return }
+        let current: [ClientGroup] = displayedClients
+        var order: [ClientGroup] = current.filter { $0.persistentModelID != liftedClientID }
+        guard let index = order.firstIndex(where: { $0.persistentModelID == target.persistentModelID }) else { return }
+        order.insert(lifted, at: before ? index : index + 1)
+        guard order.map(\.persistentModelID) != current.map(\.persistentModelID) else { return }
+        withAnimation(.smooth(duration: 0.2)) {
+            previewClients = order
+        }
+    }
+
+    private func commitDrag() {
+        guard liftedClientID != nil else { return }
+        for (index, client) in displayedClients.enumerated() where client.sortIndex != index {
+            client.sortIndex = index
         }
         modelContext.persist()
+        endDrag(animatesReturn: false)
     }
 
-    private func client(for drag: RowDrag) -> ClientGroup? {
-        guard let id = drag.persistentID else { return nil }
-        return clients.first { $0.persistentModelID == id }
+    /// The lifted row reappears in one frame so it reads as landing in its slot.
+    /// Only a cancelled drag animates, sliding rows back to their saved order.
+    private func endDrag(animatesReturn: Bool = true) {
+        guard liftedClientID != nil || previewClients != nil else { return }
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) {
+            liftedClientID = nil
+            if !animatesReturn {
+                previewClients = nil
+            }
+        }
+        withAnimation(.smooth(duration: 0.2)) {
+            previewClients = nil
+        }
     }
 
     private func delete(_ client: ClientGroup) {
