@@ -1,13 +1,6 @@
 import AppKit
-import OSLog
 import SwiftUI
 import UniformTypeIdentifiers
-
-private let reorderLogger = Logger(subsystem: "com.peptrack", category: "reorder")
-
-func logReorder(_ message: String) {
-    reorderLogger.notice("\(message, privacy: .public)")
-}
 
 /// A list row that can be dragged and reports where another row hovers over it,
 /// so the parent can move rows aside live instead of drawing an insertion line.
@@ -74,7 +67,6 @@ private struct RowDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        logReorder("perform drop")
         onDrop()
         return true
     }
@@ -130,7 +122,6 @@ extension View {
                 try? await _Concurrency.Task.sleep(for: .milliseconds(100))
                 releasedReadings = NSEvent.pressedMouseButtons & 1 == 0 ? releasedReadings + 1 : 0
                 if releasedReadings >= 2 {
-                    logReorder("mouse released, ending drag")
                     action()
                     return
                 }

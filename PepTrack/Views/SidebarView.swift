@@ -112,7 +112,6 @@ struct SidebarView: View {
     private func lift(_ client: ClientGroup) {
         let id: PersistentIdentifier = client.persistentModelID
         guard liftedClientID != id else { return }
-        logReorder("lift client")
         previewClients = nil
         liftedClientID = id
     }

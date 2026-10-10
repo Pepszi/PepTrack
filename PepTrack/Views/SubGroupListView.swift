@@ -411,7 +411,6 @@ struct SubGroupListView: View {
 
     private func lift(_ id: PersistentIdentifier) {
         guard liftedID != id else { return }
-        logReorder("lift row")
         previewGroups = nil
         previewTasks = nil
         liftedID = id
