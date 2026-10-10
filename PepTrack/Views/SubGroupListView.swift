@@ -546,7 +546,7 @@ private struct SubGroupHeader: View {
                 }
             Text("\(taskCount)")
                 .font(.caption)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(taskCount == 0 ? .tertiary : .primary)
                 .monospacedDigit()
             plusButton
         }
@@ -557,15 +557,18 @@ private struct SubGroupHeader: View {
         Button(action: onAddTask) {
             Image(systemName: "plus")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(Color.white)
+                .opacity(1)
                 .frame(width: 22, height: 22)
                 .background(
                     Circle()
-                        .fill(isHoveringPlus ? Color.primary.opacity(0.1) : .clear)
+                        .fill(isHoveringPlus ? Color.white.opacity(0.12) : .clear)
                 )
                 .contentShape(Circle())
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.white)
         .onHover { isHoveringPlus = $0 }
         .help("Add Task")
         .accessibilityLabel("Add Task")
